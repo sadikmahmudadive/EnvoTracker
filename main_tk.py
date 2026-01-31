@@ -11,6 +11,14 @@ from firebase_admin import credentials, firestore
 import requests
 import os
 import json
+import csv
+from tkinter import filedialog
+
+# plotting
+import matplotlib
+matplotlib.use('Agg')
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 # Initialize Firebase
 cred = credentials.Certificate('serviceAccountKey.json')
@@ -45,6 +53,7 @@ class EcoTrackApp(tb.Window):
 
         self._build_dashboard()
         self._build_community()
+        self._build_summary()
 
     def _build_dashboard(self):
         frame = ttk.Frame(self.nb)
@@ -75,6 +84,7 @@ class EcoTrackApp(tb.Window):
 
         self.add_btn = tb.Button(input_frame, text='Add Log', command=self.on_add_update, bootstyle='success')
         self.add_btn.grid(row=1, column=4, padx=8)
+        tb.Button(input_frame, text='Export CSV', command=self.export_csv, bootstyle='info').grid(row=1, column=6, padx=8)
 
         # Auth controls
         auth_frame = ttk.Frame(input_frame)
@@ -164,6 +174,64 @@ class EcoTrackApp(tb.Window):
         self.leaderboard.column('user', width=200)
         self.leaderboard.column('kg', width=120)
         self.leaderboard.pack(fill='both', expand=True, padx=10, pady=6)
+
+    def _build_summary(self):
+        frame = ttk.Frame(self.nb)
+        frame.pack(fill='both', expand=True)
+        self.nb.add(frame, text='Summary')
+
+        top = ttk.Frame(frame)
+        top.pack(fill='x', padx=10, pady=8)
+        ttk.Label(top, text='Monthly CO2 (last 12 months)', font=('Segoe UI', 11, 'bold')).pack(side='left')
+        tb.Button(top, text='Refresh', command=self.load_summary_async, bootstyle='primary').pack(side='right')
+
+        self.summary_canvas_frame = ttk.Frame(frame)
+        self.summary_canvas_frame.pack(fill='both', expand=True, padx=10, pady=6)
+
+    def load_summary_async(self):
+        threading.Thread(target=self.load_summary, daemon=True).start()
+
+    def load_summary(self):
+        # aggregate last 12 months by year-month
+        now = datetime.now()
+        start = (now.replace(day=1) - timedelta(days=365)).replace(day=1)
+        docs = db.collection('logs').where('timestamp', '>=', start).stream()
+        totals = {}
+        for doc in docs:
+            d = doc.to_dict()
+            ts = d.get('timestamp')
+            if not ts:
+                continue
+            if hasattr(ts, 'astimezone'):
+                dt = ts.astimezone()
+            else:
+                dt = ts
+            ym = dt.strftime('%Y-%m')
+            totals[ym] = totals.get(ym, 0) + abs(d.get('co2_impact', 0))
+
+        # build ordered last 12 months labels
+        labels = []
+        values = []
+        for i in range(11, -1, -1):
+            m = (now.replace(day=1) - timedelta(days=30*i)).strftime('%Y-%m')
+            labels.append(m)
+            values.append(round(totals.get(m, 0), 2))
+
+        # draw chart
+        fig = Figure(figsize=(6,3), dpi=100)
+        ax = fig.add_subplot(111)
+        ax.bar(labels, values, color='#2b8cbe')
+        ax.set_ylabel('kg CO2')
+        ax.set_xticklabels(labels, rotation=45, ha='right')
+        fig.tight_layout()
+
+        # clear previous
+        for child in self.summary_canvas_frame.winfo_children():
+            child.destroy()
+
+        canvas = FigureCanvasTkAgg(fig, master=self.summary_canvas_frame)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill='both', expand=True)
 
     def _on_type_change(self, e=None):
         t = self.activity_type.get()
@@ -304,6 +372,42 @@ class EcoTrackApp(tb.Window):
             # use document id as item id
             self.tree.insert('', 'end', iid=doc.id, values=values)
         self.update_weekly_progress()
+
+    def export_csv(self):
+        # fetch logs and write CSV
+        docs = db.collection('logs').order_by('timestamp', direction=firestore.Query.DESCENDING).stream()
+        rows = []
+        for doc in docs:
+            d = doc.to_dict()
+            ts = d.get('timestamp')
+            t = ts.strftime('%Y-%m-%d %H:%M:%S') if hasattr(ts, 'strftime') else ''
+            rows.append({
+                'id': doc.id,
+                'activity_type': d.get('activity_type'),
+                'activity_detail': d.get('activity_detail'),
+                'amount': d.get('amount'),
+                'co2_impact': d.get('co2_impact'),
+                'description': d.get('description'),
+                'timestamp': t,
+                'user_id': d.get('user_id','')
+            })
+
+        if not rows:
+            messagebox.showinfo('Export CSV', 'No logs to export')
+            return
+
+        fpath = filedialog.asksaveasfilename(title='Save CSV', defaultextension='.csv', filetypes=[('CSV files','*.csv')])
+        if not fpath:
+            return
+        try:
+            with open(fpath, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+                writer.writeheader()
+                for r in rows:
+                    writer.writerow(r)
+            messagebox.showinfo('Export CSV', f'Exported {len(rows)} rows to {fpath}')
+        except Exception as ex:
+            messagebox.showerror('Export CSV', str(ex))
 
     def update_weekly_progress(self):
         week_ago = datetime.now() - timedelta(days=7)
