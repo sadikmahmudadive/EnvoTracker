@@ -113,22 +113,37 @@ class EcoTrackApp(tb.Window):
         tree_frame = ttk.Frame(frame)
         tree_frame.pack(fill='both', expand=True, padx=10, pady=6)
 
-        cols = ('detail','amount','impact','description','time')
+        # include hidden 'uid' column to track owner of each log
+        cols = ('detail','amount','impact','description','time','uid')
         self.tree = ttk.Treeview(tree_frame, columns=cols, show='headings')
         for c in cols:
-            self.tree.heading(c, text=c.capitalize())
+            if c == 'uid':
+                # keep heading blank for hidden uid column
+                self.tree.heading(c, text='')
+            else:
+                self.tree.heading(c, text=c.capitalize())
         self.tree.column('detail', width=180)
         self.tree.column('amount', width=80)
         self.tree.column('impact', width=100)
         self.tree.column('description', width=260)
         self.tree.column('time', width=120)
+        # hide the uid column from view
+        self.tree.column('uid', width=0, stretch=False)
         self.tree.pack(fill='both', expand=True, side='left')
         self.tree.bind('<<TreeviewSelect>>', self.on_tree_select)
 
         btns = ttk.Frame(tree_frame)
         btns.pack(fill='y', side='right', padx=6)
-        tb.Button(btns, text='Edit', command=self.on_edit, bootstyle='warning').pack(fill='x', pady=4)
-        tb.Button(btns, text='Delete', command=self.on_delete, bootstyle='danger').pack(fill='x', pady=4)
+        # keep references so we can enable/disable based on ownership
+        self.edit_btn = tb.Button(btns, text='Edit', command=self.on_edit, bootstyle='warning')
+        self.edit_btn.pack(fill='x', pady=4)
+        self.delete_btn = tb.Button(btns, text='Delete', command=self.on_delete, bootstyle='danger')
+        self.delete_btn.pack(fill='x', pady=4)
+        try:
+            self.edit_btn.config(state='disabled')
+            self.delete_btn.config(state='disabled')
+        except Exception:
+            pass
 
         self._on_type_change()
 
@@ -214,7 +229,26 @@ class EcoTrackApp(tb.Window):
         self.load_leaderboard_async()
 
     def on_tree_select(self, e):
-        pass
+        sel = self.tree.selection()
+        if not sel:
+            try:
+                self.edit_btn.config(state='disabled')
+                self.delete_btn.config(state='disabled')
+            except Exception:
+                pass
+            return
+        item_id = sel[0]
+        item = self.tree.item(item_id)
+        vals = item.get('values', [])
+        uid = None
+        if vals and len(vals) >= 6:
+            uid = vals[5]
+        can_modify = self.current_user and uid and uid == self.current_user.get('uid')
+        try:
+            self.edit_btn.config(state='normal' if can_modify else 'disabled')
+            self.delete_btn.config(state='normal' if can_modify else 'disabled')
+        except Exception:
+            pass
 
     def on_edit(self):
         sel = self.tree.selection()
@@ -265,7 +299,8 @@ class EcoTrackApp(tb.Window):
             d = doc.to_dict()
             timestamp = d.get('timestamp')
             t = timestamp.strftime('%b %d %H:%M') if hasattr(timestamp,'strftime') else ''
-            values = (d.get('activity_detail'), d.get('amount'), d.get('co2_impact'), d.get('description'), t)
+            # include owner uid as hidden last column
+            values = (d.get('activity_detail'), d.get('amount'), d.get('co2_impact'), d.get('description'), t, d.get('user_id','default_user'))
             # use document id as item id
             self.tree.insert('', 'end', iid=doc.id, values=values)
         self.update_weekly_progress()
