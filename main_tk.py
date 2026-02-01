@@ -1,6 +1,6 @@
 import threading
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, simpledialog
 import ttkbootstrap as tb
 from tkinter import ttk
 from datetime import datetime, timedelta
@@ -38,6 +38,7 @@ class EcoTrackApp(tb.Window):
         self.selected_doc_id = None
         self.current_user = None
         self.api_key = None
+        self.user_goal = WEEKLY_GOAL_KG
         self._load_firebase_config()
 
         self._build_ui()
@@ -54,6 +55,7 @@ class EcoTrackApp(tb.Window):
         self._build_dashboard()
         self._build_community()
         self._build_summary()
+        self._build_profile()
 
     def _build_dashboard(self):
         frame = ttk.Frame(self.nb)
@@ -118,6 +120,10 @@ class EcoTrackApp(tb.Window):
         self.total_label.pack(side='left')
         self.progress = tb.Progressbar(progress_frame, length=300, bootstyle='success')
         self.progress.pack(side='right', padx=12)
+        # user goal display and set
+        self.goal_label = ttk.Label(progress_frame, text=f'Goal: {self.user_goal} kg')
+        self.goal_label.pack(side='left', padx=12)
+        tb.Button(progress_frame, text='Set Goal', command=self.set_goal_dialog, bootstyle='outline-secondary').pack(side='left')
 
         # Bottom: Logs tree
         tree_frame = ttk.Frame(frame)
@@ -166,6 +172,18 @@ class EcoTrackApp(tb.Window):
         top.pack(fill='x', padx=10, pady=8)
         self.community_total = ttk.Label(top, text='🌍 Total Community Impact: 0 kg', font=('Segoe UI', 11, 'bold'))
         self.community_total.pack(side='left')
+        # search and sort controls
+        ctrl = ttk.Frame(top)
+        ctrl.pack(side='right')
+        ttk.Label(ctrl, text='Search:').pack(side='left', padx=(0,4))
+        self.leaderboard_search_var = tk.StringVar()
+        ttk.Entry(ctrl, textvariable=self.leaderboard_search_var, width=20).pack(side='left')
+        tb.Button(ctrl, text='Search', command=self.load_leaderboard_async, bootstyle='outline-primary').pack(side='left', padx=4)
+        tb.Button(ctrl, text='Clear', command=self._clear_leaderboard_search, bootstyle='outline-secondary').pack(side='left', padx=4)
+        ttk.Label(ctrl, text='Sort:').pack(side='left', padx=(8,4))
+        self.leaderboard_sort_var = tk.StringVar(value='Total')
+        self.leaderboard_sort = ttk.Combobox(ctrl, values=['Total','Name'], textvariable=self.leaderboard_sort_var, state='readonly', width=8)
+        self.leaderboard_sort.pack(side='left')
         tb.Button(top, text='Refresh', command=self.load_leaderboard_async, bootstyle='primary').pack(side='right')
 
         self.leaderboard = ttk.Treeview(frame, columns=('user','kg'), show='headings')
@@ -174,6 +192,13 @@ class EcoTrackApp(tb.Window):
         self.leaderboard.column('user', width=200)
         self.leaderboard.column('kg', width=120)
         self.leaderboard.pack(fill='both', expand=True, padx=10, pady=6)
+
+    def _clear_leaderboard_search(self):
+        try:
+            self.leaderboard_search_var.set('')
+        except Exception:
+            pass
+        self.load_leaderboard_async()
 
     def _build_summary(self):
         frame = ttk.Frame(self.nb)
@@ -232,6 +257,34 @@ class EcoTrackApp(tb.Window):
         canvas = FigureCanvasTkAgg(fig, master=self.summary_canvas_frame)
         canvas.draw()
         canvas.get_tk_widget().pack(fill='both', expand=True)
+
+    def _build_profile(self):
+        frame = ttk.Frame(self.nb)
+        frame.pack(fill='both', expand=True)
+        self.nb.add(frame, text='Profile')
+
+        container = ttk.Frame(frame)
+        container.pack(fill='both', expand=True, padx=12, pady=12)
+
+        ttk.Label(container, text='Display Name').grid(row=0, column=0, sticky='w')
+        self.display_name_var = tk.StringVar()
+        self.display_name_entry = ttk.Entry(container, textvariable=self.display_name_var, width=30)
+        self.display_name_entry.grid(row=1, column=0, padx=6, pady=4)
+
+        ttk.Label(container, text='Location').grid(row=0, column=1, sticky='w')
+        self.location_var = tk.StringVar()
+        self.location_entry = ttk.Entry(container, textvariable=self.location_var, width=30)
+        self.location_entry.grid(row=1, column=1, padx=6, pady=4)
+
+        tb.Button(container, text='Save Profile', command=self.save_profile, bootstyle='primary').grid(row=1, column=2, padx=8)
+
+        # start disabled until signed in
+        try:
+            self.display_name_entry.config(state='disabled')
+            self.location_entry.config(state='disabled')
+        except Exception:
+            pass
+
 
     def _on_type_change(self, e=None):
         t = self.activity_type.get()
@@ -373,14 +426,100 @@ class EcoTrackApp(tb.Window):
             self.tree.insert('', 'end', iid=doc.id, values=values)
         self.update_weekly_progress()
 
+    def load_user_profile_async(self):
+        threading.Thread(target=self.load_user_profile, daemon=True).start()
+
+    def load_user_profile(self):
+        # fetch user doc with personal settings (like weekly goal)
+        if not self.current_user:
+            return
+        try:
+            uid = self.current_user.get('uid')
+            doc = db.collection('users').document(uid).get()
+            if doc.exists:
+                d = doc.to_dict()
+                goal = d.get('weekly_goal_kg')
+                if goal:
+                    self.user_goal = goal
+                # profile fields
+                name = d.get('display_name')
+                loc = d.get('location')
+                try:
+                    if name:
+                        self.display_name_var.set(name)
+                    if loc:
+                        self.location_var.set(loc)
+                except Exception:
+                    pass
+            # update UI on main thread
+            try:
+                self.goal_label.config(text=f'Goal: {self.user_goal} kg')
+            except Exception:
+                pass
+            # enable profile fields when loaded
+            try:
+                self.display_name_entry.config(state='normal')
+                self.location_entry.config(state='normal')
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def set_goal_dialog(self):
+        if not self.current_user:
+            messagebox.showinfo('Set Goal','Sign in to set a personal goal')
+            return
+        val = simpledialog.askfloat('Set Weekly Goal','Enter weekly CO2 goal (kg):', minvalue=1, initialvalue=self.user_goal)
+        if val is None:
+            return
+        try:
+            uid = self.current_user.get('uid')
+            db.collection('users').document(uid).set({'weekly_goal_kg': float(val)}, merge=True)
+            self.user_goal = float(val)
+            self.goal_label.config(text=f'Goal: {self.user_goal} kg')
+            self.update_weekly_progress()
+            messagebox.showinfo('Goal Saved', f'Weekly goal set to {self.user_goal} kg')
+        except Exception as ex:
+            messagebox.showerror('Error', str(ex))
+
+    def save_profile(self):
+        if not self.current_user:
+            messagebox.showinfo('Profile','Sign in to save your profile')
+            return
+        try:
+            uid = self.current_user.get('uid')
+            payload = {
+                'display_name': self.display_name_var.get() or None,
+                'location': self.location_var.get() or None,
+            }
+            db.collection('users').document(uid).set(payload, merge=True)
+            messagebox.showinfo('Profile', 'Profile saved')
+        except Exception as ex:
+            messagebox.showerror('Profile', str(ex))
+
     def export_csv(self):
         # fetch logs and write CSV
         docs = db.collection('logs').order_by('timestamp', direction=firestore.Query.DESCENDING).stream()
         rows = []
+        user_cache = {}
         for doc in docs:
             d = doc.to_dict()
             ts = d.get('timestamp')
             t = ts.strftime('%Y-%m-%d %H:%M:%S') if hasattr(ts, 'strftime') else ''
+            uid = d.get('user_id','')
+            display_name = ''
+            if uid:
+                if uid in user_cache:
+                    display_name = user_cache[uid]
+                else:
+                    try:
+                        udoc = db.collection('users').document(uid).get()
+                        if udoc.exists:
+                            udata = udoc.to_dict()
+                            display_name = udata.get('display_name') or ''
+                    except Exception:
+                        display_name = ''
+                    user_cache[uid] = display_name
             rows.append({
                 'id': doc.id,
                 'activity_type': d.get('activity_type'),
@@ -389,7 +528,8 @@ class EcoTrackApp(tb.Window):
                 'co2_impact': d.get('co2_impact'),
                 'description': d.get('description'),
                 'timestamp': t,
-                'user_id': d.get('user_id','')
+                'user_id': uid,
+                'display_name': display_name,
             })
 
         if not rows:
@@ -417,7 +557,12 @@ class EcoTrackApp(tb.Window):
             d = doc.to_dict()
             total += abs(d.get('co2_impact',0))
         self.total_label.config(text=f'Total CO2 This Week: {round(total,2)} kg')
-        self.progress['value'] = min(total/WEEKLY_GOAL_KG*100, 100)
+        goal = getattr(self, 'user_goal', WEEKLY_GOAL_KG) or WEEKLY_GOAL_KG
+        try:
+            pct = min(total/goal*100, 100)
+        except Exception:
+            pct = 0
+        self.progress['value'] = pct
 
     def load_leaderboard_async(self):
         threading.Thread(target=self.load_leaderboard, daemon=True).start()
@@ -434,22 +579,65 @@ class EcoTrackApp(tb.Window):
             kg = abs(d.get('co2_impact',0))
             totals[uid] = totals.get(uid,0)+kg
             total_community += kg
-        # Map the current signed-in user's UID to a friendly label
+        # Resolve display names where available (users collection), with caching
         label_map = {}
+        user_cache = {}
         for uid in totals.keys():
+            if uid == 'default_user':
+                label_map[uid] = 'Anonymous'
+                continue
             if self.current_user and uid == self.current_user.get('uid'):
                 label_map[uid] = f"You ({self.current_user.get('email')})"
-            elif uid == 'default_user':
-                label_map[uid] = 'Anonymous'
-            else:
-                label_map[uid] = uid
+                continue
+            # try cache first
+            if uid in user_cache:
+                name = user_cache.get(uid)
+                label_map[uid] = name or uid
+                continue
+            try:
+                doc = db.collection('users').document(uid).get()
+                if doc.exists:
+                    d = doc.to_dict()
+                    name = d.get('display_name')
+                    user_cache[uid] = name
+                    if name:
+                        label_map[uid] = name
+                        continue
+            except Exception:
+                pass
+            label_map[uid] = uid
 
         self.community_total.config(text=f'🌍 Total Community Impact: {round(total_community,2)} kg')
-        # sort by kg desc and insert with friendly labels
-        sorted_users = sorted(totals.items(), key=lambda x: x[1], reverse=True)
-        for i, (u, k) in enumerate(sorted_users[:50], 1):
-            display_name = label_map.get(u, u)
-            self.leaderboard.insert('', 'end', values=(display_name, round(k, 2)))
+
+        # Apply search filter (by display name or uid)
+        search_term = ''
+        try:
+            search_term = (self.leaderboard_search_var.get() or '').strip().lower()
+        except Exception:
+            search_term = ''
+
+        rows = []
+        for uid, kg in totals.items():
+            display_name = label_map.get(uid, uid)
+            rows.append((uid, display_name, kg))
+
+        # apply search
+        if search_term:
+            rows = [r for r in rows if search_term in (r[1] or '').lower() or search_term in (r[0] or '').lower()]
+
+        # sort
+        sort_by = 'Total'
+        try:
+            sort_by = (self.leaderboard_sort_var.get() or 'Total')
+        except Exception:
+            sort_by = 'Total'
+        if sort_by == 'Name':
+            rows.sort(key=lambda x: (x[1] or '').lower())
+        else:
+            rows.sort(key=lambda x: x[2], reverse=True)
+
+        for uid, display_name, kg in rows[:50]:
+            self.leaderboard.insert('', 'end', values=(display_name, round(kg, 2)))
 
     # --- Authentication helpers ---
     def _load_firebase_config(self):
@@ -511,8 +699,16 @@ class EcoTrackApp(tb.Window):
                 self.register_btn.config(state='disabled')
                 self.email_entry.config(state='disabled')
                 self.pw_entry.config(state='disabled')
+                # enable profile inputs (will be filled by load_user_profile)
+                try:
+                    self.display_name_entry.config(state='normal')
+                    self.location_entry.config(state='normal')
+                except Exception:
+                    pass
             except Exception:
                 pass
+            # load user profile (goal etc.)
+            self.load_user_profile_async()
             self.load_leaderboard_async()
             self.load_logs_async()
         else:
@@ -530,6 +726,20 @@ class EcoTrackApp(tb.Window):
             self.register_btn.config(state='normal')
             self.email_entry.config(state='normal')
             self.pw_entry.config(state='normal')
+        except Exception:
+            pass
+        # reset to default goal on sign out
+        self.user_goal = WEEKLY_GOAL_KG
+        try:
+            self.goal_label.config(text=f'Goal: {self.user_goal} kg')
+        except Exception:
+            pass
+        # clear profile fields and disable
+        try:
+            self.display_name_var.set('')
+            self.location_var.set('')
+            self.display_name_entry.config(state='disabled')
+            self.location_entry.config(state='disabled')
         except Exception:
             pass
         self.load_leaderboard_async()
