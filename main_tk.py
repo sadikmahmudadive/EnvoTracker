@@ -61,8 +61,16 @@ class EcoTrackApp(tb.Window):
         # Header
         header = ttk.Frame(self, padding=(12, 8), style='Accent.TFrame')
         header.pack(fill='x')
-        ttk.Label(header, text=APP_TITLE, style='Header.TLabel').pack(side='left')
-        ttk.Label(header, text='Track habits, measure impact, and join the community', style='SubHeader.TLabel').pack(side='left', padx=12)
+        left = ttk.Frame(header)
+        left.pack(side='left', fill='x', expand=True)
+        ttk.Label(left, text='🌱 ' + APP_TITLE, style='Header.TLabel').pack(side='left')
+        ttk.Label(left, text='Track habits, measure impact, and join the community', style='SubHeader.TLabel').pack(side='left', padx=12)
+        # compact right-side header info
+        right = ttk.Frame(header)
+        right.pack(side='right')
+        self.header_user_label = ttk.Label(right, text='Not signed in', foreground='gray')
+        self.header_user_label.pack(side='right', padx=(8,4))
+        ttk.Label(right, text='v0.9', style='SubHeader.TLabel').pack(side='right')
 
         # Notebook for tabs
         self.nb = ttk.Notebook(self)
@@ -79,7 +87,8 @@ class EcoTrackApp(tb.Window):
         self.nb.add(frame, text='Dashboard')
 
         # Top: Inputs
-        input_frame = ttk.Frame(frame)
+        # Inputs wrapped in a labeled card for emphasis
+        input_frame = ttk.LabelFrame(frame, text='Log Activity', padding=10)
         input_frame.pack(fill='x', padx=10, pady=10)
 
         ttk.Label(input_frame, text='Activity Type').grid(row=0, column=0, sticky='w')
@@ -106,7 +115,7 @@ class EcoTrackApp(tb.Window):
 
         # Auth controls
         auth_frame = ttk.Frame(input_frame)
-        auth_frame.grid(row=0, column=5, rowspan=2, padx=10)
+        auth_frame.grid(row=0, column=5, rowspan=2, padx=10, sticky='e')
         ttk.Label(auth_frame, text='Email').grid(row=0, column=0, sticky='w')
         self.email_var = tk.StringVar()
         self.email_entry = ttk.Entry(auth_frame, textvariable=self.email_var, width=25)
@@ -181,6 +190,12 @@ class EcoTrackApp(tb.Window):
             pass
 
         self._on_type_change()
+
+        # footer / status bar
+        footer = ttk.Frame(self, padding=(6,4))
+        footer.pack(fill='x', side='bottom')
+        self.status_label = ttk.Label(footer, text='Ready', style='SubHeader.TLabel')
+        self.status_label.pack(side='left', padx=8)
 
     def _build_community(self):
         frame = ttk.Frame(self.nb)
