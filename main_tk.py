@@ -32,8 +32,20 @@ class EcoTrackApp(tb.Window):
     def __init__(self):
         super().__init__(themename='minty')
         self.title(APP_TITLE)
-        self.geometry('900x600')
+        self.geometry('1000x680')
         self.configure(bg='#F0F7F4')
+
+        # style tweaks for a cleaner, modern look
+        style = tb.Style()
+        try:
+            style.configure('Header.TLabel', font=('Segoe UI', 16, 'bold'))
+            style.configure('SubHeader.TLabel', font=('Segoe UI', 10, 'italic'))
+            style.configure('TLabel', font=('Segoe UI', 10))
+            style.configure('Treeview', rowheight=26, font=('Segoe UI', 10))
+            style.configure('Treeview.Heading', font=('Segoe UI', 10, 'bold'))
+            style.configure('Accent.TFrame', background='#E8F6F1')
+        except Exception:
+            pass
 
         self.selected_doc_id = None
         self.current_user = None
@@ -46,7 +58,11 @@ class EcoTrackApp(tb.Window):
         self.load_leaderboard_async()
 
     def _build_ui(self):
-        # ttkbootstrap Style applied by tb.Window with themename='minty'
+        # Header
+        header = ttk.Frame(self, padding=(12, 8), style='Accent.TFrame')
+        header.pack(fill='x')
+        ttk.Label(header, text=APP_TITLE, style='Header.TLabel').pack(side='left')
+        ttk.Label(header, text='Track habits, measure impact, and join the community', style='SubHeader.TLabel').pack(side='left', padx=12)
 
         # Notebook for tabs
         self.nb = ttk.Notebook(self)
@@ -64,7 +80,7 @@ class EcoTrackApp(tb.Window):
 
         # Top: Inputs
         input_frame = ttk.Frame(frame)
-        input_frame.pack(fill='x', padx=10, pady=8)
+        input_frame.pack(fill='x', padx=10, pady=10)
 
         ttk.Label(input_frame, text='Activity Type').grid(row=0, column=0, sticky='w')
         self.activity_type = ttk.Combobox(input_frame, values=['Transport','Meal','Energy'], state='readonly')
@@ -84,9 +100,9 @@ class EcoTrackApp(tb.Window):
         self.desc_var = tk.StringVar()
         ttk.Entry(input_frame, textvariable=self.desc_var, width=30).grid(row=1, column=3, padx=6, pady=4)
 
-        self.add_btn = tb.Button(input_frame, text='Add Log', command=self.on_add_update, bootstyle='success')
-        self.add_btn.grid(row=1, column=4, padx=8)
-        tb.Button(input_frame, text='Export CSV', command=self.export_csv, bootstyle='info').grid(row=1, column=6, padx=8)
+        self.add_btn = tb.Button(input_frame, text='➕ Add Log', command=self.on_add_update, bootstyle='success')
+        self.add_btn.grid(row=1, column=4, padx=8, pady=4)
+        tb.Button(input_frame, text='📤 Export CSV', command=self.export_csv, bootstyle='info').grid(row=1, column=6, padx=8, pady=4)
 
         # Auth controls
         auth_frame = ttk.Frame(input_frame)
@@ -113,47 +129,50 @@ class EcoTrackApp(tb.Window):
         self.user_label = ttk.Label(auth_frame, text='Not signed in', foreground='gray')
         self.user_label.grid(row=2, column=0, columnspan=4, pady=4)
 
-        # Middle: Progress
-        progress_frame = ttk.Frame(frame)
-        progress_frame.pack(fill='x', padx=10, pady=6)
-        self.total_label = ttk.Label(progress_frame, text='Total CO2 This Week: 0 kg', font=('Segoe UI', 10, 'bold'))
+        # Middle: Progress (card-like)
+        progress_frame = ttk.Frame(frame, padding=8, style='Accent.TFrame')
+        progress_frame.pack(fill='x', padx=10, pady=8)
+        self.total_label = ttk.Label(progress_frame, text='Total CO2 This Week: 0 kg', font=('Segoe UI', 11, 'bold'))
         self.total_label.pack(side='left')
-        self.progress = tb.Progressbar(progress_frame, length=300, bootstyle='success')
-        self.progress.pack(side='right', padx=12)
-        # user goal display and set
-        self.goal_label = ttk.Label(progress_frame, text=f'Goal: {self.user_goal} kg')
+        self.goal_label = ttk.Label(progress_frame, text=f'Goal: {self.user_goal} kg', font=('Segoe UI', 10))
         self.goal_label.pack(side='left', padx=12)
-        tb.Button(progress_frame, text='Set Goal', command=self.set_goal_dialog, bootstyle='outline-secondary').pack(side='left')
+        tb.Button(progress_frame, text='🎯 Set Goal', command=self.set_goal_dialog, bootstyle='outline-secondary').pack(side='left')
+        self.progress = tb.Progressbar(progress_frame, length=420, bootstyle='success')
+        self.progress.pack(side='right', padx=12)
 
         # Bottom: Logs tree
         tree_frame = ttk.Frame(frame)
-        tree_frame.pack(fill='both', expand=True, padx=10, pady=6)
+        tree_frame.pack(fill='both', expand=True, padx=10, pady=8)
 
         # include hidden 'uid' column to track owner of each log
         cols = ('detail','amount','impact','description','time','uid')
-        self.tree = ttk.Treeview(tree_frame, columns=cols, show='headings')
+        self.tree = ttk.Treeview(tree_frame, columns=cols, show='headings', selectmode='browse')
         for c in cols:
             if c == 'uid':
                 # keep heading blank for hidden uid column
                 self.tree.heading(c, text='')
             else:
                 self.tree.heading(c, text=c.capitalize())
-        self.tree.column('detail', width=180)
-        self.tree.column('amount', width=80)
-        self.tree.column('impact', width=100)
-        self.tree.column('description', width=260)
-        self.tree.column('time', width=120)
+        self.tree.column('detail', width=220)
+        self.tree.column('amount', width=90, anchor='center')
+        self.tree.column('impact', width=120, anchor='center')
+        self.tree.column('description', width=320)
+        self.tree.column('time', width=140, anchor='center')
         # hide the uid column from view
         self.tree.column('uid', width=0, stretch=False)
+        # add vertical scrollbar
         self.tree.pack(fill='both', expand=True, side='left')
+        vsb = ttk.Scrollbar(tree_frame, orient='vertical', command=self.tree.yview)
+        self.tree.configure(yscrollcommand=vsb.set)
+        vsb.pack(side='left', fill='y')
         self.tree.bind('<<TreeviewSelect>>', self.on_tree_select)
 
         btns = ttk.Frame(tree_frame)
-        btns.pack(fill='y', side='right', padx=6)
+        btns.pack(fill='y', side='right', padx=6, pady=6)
         # keep references so we can enable/disable based on ownership
-        self.edit_btn = tb.Button(btns, text='Edit', command=self.on_edit, bootstyle='warning')
+        self.edit_btn = tb.Button(btns, text='✏️ Edit', command=self.on_edit, bootstyle='warning')
         self.edit_btn.pack(fill='x', pady=4)
-        self.delete_btn = tb.Button(btns, text='Delete', command=self.on_delete, bootstyle='danger')
+        self.delete_btn = tb.Button(btns, text='🗑️ Delete', command=self.on_delete, bootstyle='danger')
         self.delete_btn.pack(fill='x', pady=4)
         try:
             self.edit_btn.config(state='disabled')
@@ -167,31 +186,43 @@ class EcoTrackApp(tb.Window):
         frame = ttk.Frame(self.nb)
         frame.pack(fill='both', expand=True)
         self.nb.add(frame, text='Community')
-
-        top = ttk.Frame(frame)
+        top = ttk.Frame(frame, padding=8, style='Accent.TFrame')
         top.pack(fill='x', padx=10, pady=8)
-        self.community_total = ttk.Label(top, text='🌍 Total Community Impact: 0 kg', font=('Segoe UI', 11, 'bold'))
+        self.community_total = ttk.Label(top, text='🌍 Total Community Impact: 0 kg', font=('Segoe UI', 12, 'bold'))
         self.community_total.pack(side='left')
-        # search and sort controls
+        # search and sort controls (compact)
         ctrl = ttk.Frame(top)
         ctrl.pack(side='right')
         ttk.Label(ctrl, text='Search:').pack(side='left', padx=(0,4))
         self.leaderboard_search_var = tk.StringVar()
-        ttk.Entry(ctrl, textvariable=self.leaderboard_search_var, width=20).pack(side='left')
-        tb.Button(ctrl, text='Search', command=self.load_leaderboard_async, bootstyle='outline-primary').pack(side='left', padx=4)
-        tb.Button(ctrl, text='Clear', command=self._clear_leaderboard_search, bootstyle='outline-secondary').pack(side='left', padx=4)
+        ttk.Entry(ctrl, textvariable=self.leaderboard_search_var, width=18).pack(side='left')
+        tb.Button(ctrl, text='Search', command=self.load_leaderboard_async, bootstyle='outline-primary').pack(side='left', padx=6)
+        tb.Button(ctrl, text='Clear', command=self._clear_leaderboard_search, bootstyle='outline-secondary').pack(side='left', padx=6)
         ttk.Label(ctrl, text='Sort:').pack(side='left', padx=(8,4))
         self.leaderboard_sort_var = tk.StringVar(value='Total')
         self.leaderboard_sort = ttk.Combobox(ctrl, values=['Total','Name'], textvariable=self.leaderboard_sort_var, state='readonly', width=8)
         self.leaderboard_sort.pack(side='left')
         tb.Button(top, text='Refresh', command=self.load_leaderboard_async, bootstyle='primary').pack(side='right')
 
-        self.leaderboard = ttk.Treeview(frame, columns=('user','kg'), show='headings')
+        # leaderboard tree with scrollbar and nicer sizing
+        self.leaderboard = ttk.Treeview(frame, columns=('user','kg'), show='headings', selectmode='browse')
         self.leaderboard.heading('user', text='User')
         self.leaderboard.heading('kg', text='kg CO2')
-        self.leaderboard.column('user', width=200)
-        self.leaderboard.column('kg', width=120)
-        self.leaderboard.pack(fill='both', expand=True, padx=10, pady=6)
+        self.leaderboard.column('user', width=360)
+        self.leaderboard.column('kg', width=140, anchor='center')
+
+        lb_frame = ttk.Frame(frame)
+        lb_frame.pack(fill='both', expand=True, padx=10, pady=6)
+        self.leaderboard.pack(in_=lb_frame, fill='both', expand=True, side='left')
+        lb_vsb = ttk.Scrollbar(lb_frame, orient='vertical', command=self.leaderboard.yview)
+        self.leaderboard.configure(yscrollcommand=lb_vsb.set)
+        lb_vsb.pack(side='left', fill='y')
+        # alternating row colors
+        try:
+            self.leaderboard.tag_configure('odd', background='#FFFFFF')
+            self.leaderboard.tag_configure('even', background='#F7FFFB')
+        except Exception:
+            pass
 
     def _clear_leaderboard_search(self):
         try:
@@ -242,13 +273,15 @@ class EcoTrackApp(tb.Window):
             labels.append(m)
             values.append(round(totals.get(m, 0), 2))
 
-        # draw chart
-        fig = Figure(figsize=(6,3), dpi=100)
-        ax = fig.add_subplot(111)
-        ax.bar(labels, values, color='#2b8cbe')
+        # draw chart with cleaner palette
+        fig = Figure(figsize=(8,3.2), dpi=100, facecolor='#F8FCFB')
+        ax = fig.add_subplot(111, facecolor='#F8FCFB')
+        bars = ax.bar(labels, values, color='#2b8cbe', edgecolor='#08519c')
         ax.set_ylabel('kg CO2')
         ax.set_xticklabels(labels, rotation=45, ha='right')
-        fig.tight_layout()
+        ax.grid(axis='y', linestyle='--', alpha=0.4)
+        ax.set_ylim(0, max(values) * 1.15 if values else 1)
+        fig.tight_layout(pad=1.0)
 
         # clear previous
         for child in self.summary_canvas_frame.winfo_children():
@@ -498,7 +531,7 @@ class EcoTrackApp(tb.Window):
             messagebox.showerror('Profile', str(ex))
 
     def export_csv(self):
-        # fetch logs and write CSV
+        # fetch logs and write CSV (with display_name) or per-user CSVs
         docs = db.collection('logs').order_by('timestamp', direction=firestore.Query.DESCENDING).stream()
         rows = []
         user_cache = {}
@@ -528,23 +561,60 @@ class EcoTrackApp(tb.Window):
                 'co2_impact': d.get('co2_impact'),
                 'description': d.get('description'),
                 'timestamp': t,
-                'user_id': uid,
                 'display_name': display_name,
+                'user_id': uid,
             })
 
         if not rows:
             messagebox.showinfo('Export CSV', 'No logs to export')
             return
 
+        per_user = messagebox.askyesno('Export CSV', 'Export separate CSV files per user? (Yes = separate files, No = single CSV)')
+        if per_user:
+            folder = filedialog.askdirectory(title='Select folder to save per-user CSVs')
+            if not folder:
+                return
+            # group rows by uid
+            groups = {}
+            for r in rows:
+                uid = r.get('user_id') or 'unknown'
+                groups.setdefault(uid, []).append(r)
+
+            def _safe_name(s):
+                s = s or ''
+                name = ''.join(c for c in s if c.isalnum() or c in (' ', '-', '_')).rstrip()
+                name = name.replace(' ', '_') or 'user'
+                return name
+
+            count = 0
+            for uid, group in groups.items():
+                display = user_cache.get(uid) or uid
+                fname = f"{_safe_name(display)}_{uid[:8] if uid else 'anon'}.csv"
+                path = os.path.join(folder, fname)
+                try:
+                    with open(path, 'w', newline='', encoding='utf-8') as f:
+                        fieldnames = ['id','activity_type','activity_detail','amount','co2_impact','description','timestamp','display_name','user_id']
+                        writer = csv.DictWriter(f, fieldnames=fieldnames)
+                        writer.writeheader()
+                        for r in group:
+                            writer.writerow({k: r.get(k, '') for k in fieldnames})
+                    count += 1
+                except Exception as ex:
+                    messagebox.showerror('Export CSV', f'Failed to write {path}: {ex}')
+            messagebox.showinfo('Export CSV', f'Exported {count} files to {folder}')
+            return
+
+        # single CSV: ask file path
         fpath = filedialog.asksaveasfilename(title='Save CSV', defaultextension='.csv', filetypes=[('CSV files','*.csv')])
         if not fpath:
             return
         try:
             with open(fpath, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+                fieldnames = ['id','activity_type','activity_detail','amount','co2_impact','description','timestamp','display_name','user_id']
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()
                 for r in rows:
-                    writer.writerow(r)
+                    writer.writerow({k: r.get(k, '') for k in fieldnames})
             messagebox.showinfo('Export CSV', f'Exported {len(rows)} rows to {fpath}')
         except Exception as ex:
             messagebox.showerror('Export CSV', str(ex))
@@ -636,8 +706,9 @@ class EcoTrackApp(tb.Window):
         else:
             rows.sort(key=lambda x: x[2], reverse=True)
 
-        for uid, display_name, kg in rows[:50]:
-            self.leaderboard.insert('', 'end', values=(display_name, round(kg, 2)))
+        for idx, (uid, display_name, kg) in enumerate(rows[:200]):
+            tag = 'even' if idx % 2 == 0 else 'odd'
+            self.leaderboard.insert('', 'end', values=(display_name, round(kg, 2)), tags=(tag,))
 
     # --- Authentication helpers ---
     def _load_firebase_config(self):
