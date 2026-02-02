@@ -20,6 +20,57 @@ matplotlib.use('Agg')
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
+
+# Simple Tooltip helper for Tk widgets
+class Tooltip:
+    def __init__(self, widget, text, delay=400):
+        self.widget = widget
+        self.text = text
+        self.delay = delay
+        self._id = None
+        self.tw = None
+        widget.bind('<Enter>', self._enter)
+        widget.bind('<Leave>', self._leave)
+        widget.bind('<ButtonPress>', self._leave)
+
+    def _enter(self, _=None):
+        self._schedule()
+
+    def _leave(self, _=None):
+        self._unschedule()
+        self._hide()
+
+    def _schedule(self):
+        self._unschedule()
+        self._id = self.widget.after(self.delay, self._show)
+
+    def _unschedule(self):
+        if self._id:
+            try:
+                self.widget.after_cancel(self._id)
+            except Exception:
+                pass
+            self._id = None
+
+    def _show(self):
+        if self.tw:
+            return
+        x = self.widget.winfo_rootx() + 20
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 4
+        self.tw = tk.Toplevel(self.widget)
+        self.tw.wm_overrideredirect(True)
+        self.tw.wm_geometry(f'+{x}+{y}')
+        lbl = ttk.Label(self.tw, text=self.text, background='#ffffe0', relief='solid', borderwidth=1)
+        lbl.pack(ipadx=4, ipady=2)
+
+    def _hide(self):
+        if self.tw:
+            try:
+                self.tw.destroy()
+            except Exception:
+                pass
+            self.tw = None
+
 # Initialize Firebase
 cred = credentials.Certificate('serviceAccountKey.json')
 firebase_admin.initialize_app(cred)
@@ -38,12 +89,33 @@ class EcoTrackApp(tb.Window):
         # style tweaks for a cleaner, modern look
         style = tb.Style()
         try:
+            # Fonts
             style.configure('Header.TLabel', font=('Segoe UI', 16, 'bold'))
             style.configure('SubHeader.TLabel', font=('Segoe UI', 10, 'italic'))
             style.configure('TLabel', font=('Segoe UI', 10))
-            style.configure('Treeview', rowheight=26, font=('Segoe UI', 10))
+            style.configure('TButton', font=('Segoe UI', 10, 'bold'))
+            style.configure('TEntry', font=('Segoe UI', 10))
+            style.configure('TCombobox', font=('Segoe UI', 10))
+
+            # Treeview
+            style.configure('Treeview', rowheight=28, font=('Segoe UI', 10))
             style.configure('Treeview.Heading', font=('Segoe UI', 10, 'bold'))
+            # smooth selection and focus
+            style.map('Treeview', background=[('selected', '#74c69d')], foreground=[('selected', '#001f00')])
+
+            # Frames and cards
             style.configure('Accent.TFrame', background='#E8F6F1')
+            style.configure('Card.TLabelframe', background='#FFFFFF', borderwidth=1, relief='solid')
+            style.configure('Card.TLabelframe.Label', font=('Segoe UI', 11, 'bold'))
+
+            # Notebook tabs
+            style.configure('TNotebook.Tab', font=('Segoe UI', 10, 'bold'), padding=(8,6))
+
+            # Progress
+            style.configure('TProgressbar', troughcolor='#F0F7F4')
+
+            # Ensure buttons have consistent padding
+            style.configure('Primary.TButton', font=('Segoe UI', 10, 'bold'), padding=(8,6))
         except Exception:
             pass
 
@@ -68,9 +140,32 @@ class EcoTrackApp(tb.Window):
         # compact right-side header info
         right = ttk.Frame(header)
         right.pack(side='right')
+        # Theme selector
+        # try to get available ttkbootstrap themes; fall back to sensible defaults
+        try:
+            st = tb.Style()
+            themes = list(getattr(st, 'theme_names', lambda: [])() or [])
+            current = getattr(st, 'theme_use', lambda: None)()
+        except Exception:
+            themes = []
+            current = None
+        # sensible fallback list if library doesn't expose themes
+        if not themes:
+            themes = ['minty', 'sandstone', 'flatly', 'darkly']
+        if not current or current not in themes:
+            # attempt to read ttk's current theme, else pick first
+            try:
+                import tkinter.ttk as ttk_native
+                current = ttk_native.Style().theme_use() or themes[0]
+            except Exception:
+                current = themes[0]
+        self.theme_var = tk.StringVar(value=current)
+        self.theme_selector = ttk.Combobox(right, values=themes, textvariable=self.theme_var, width=9, state='readonly')
+        self.theme_selector.pack(side='right', padx=(6,4))
+        self.theme_selector.bind('<<ComboboxSelected>>', lambda e: self.change_theme())
+        ttk.Label(right, text='v0.9', style='SubHeader.TLabel').pack(side='right')
         self.header_user_label = ttk.Label(right, text='Not signed in', foreground='gray')
         self.header_user_label.pack(side='right', padx=(8,4))
-        ttk.Label(right, text='v0.9', style='SubHeader.TLabel').pack(side='right')
 
         # Notebook for tabs
         self.nb = ttk.Notebook(self)
@@ -111,7 +206,10 @@ class EcoTrackApp(tb.Window):
 
         self.add_btn = tb.Button(input_frame, text='➕ Add Log', command=self.on_add_update, bootstyle='success')
         self.add_btn.grid(row=1, column=4, padx=8, pady=4)
-        tb.Button(input_frame, text='📤 Export CSV', command=self.export_csv, bootstyle='info').grid(row=1, column=6, padx=8, pady=4)
+        Tooltip(self.add_btn, 'Add a new activity log')
+        exp_btn = tb.Button(input_frame, text='📤 Export CSV', command=self.export_csv, bootstyle='info')
+        exp_btn.grid(row=1, column=6, padx=8, pady=4)
+        Tooltip(exp_btn, 'Export logs to CSV (single or per-user)')
 
         # Auth controls
         auth_frame = ttk.Frame(input_frame)
@@ -181,8 +279,10 @@ class EcoTrackApp(tb.Window):
         # keep references so we can enable/disable based on ownership
         self.edit_btn = tb.Button(btns, text='✏️ Edit', command=self.on_edit, bootstyle='warning')
         self.edit_btn.pack(fill='x', pady=4)
+        Tooltip(self.edit_btn, 'Edit selected log (you must be the owner)')
         self.delete_btn = tb.Button(btns, text='🗑️ Delete', command=self.on_delete, bootstyle='danger')
         self.delete_btn.pack(fill='x', pady=4)
+        Tooltip(self.delete_btn, 'Delete selected log (you must be the owner)')
         try:
             self.edit_btn.config(state='disabled')
             self.delete_btn.config(state='disabled')
@@ -210,9 +310,13 @@ class EcoTrackApp(tb.Window):
         ctrl.pack(side='right')
         ttk.Label(ctrl, text='Search:').pack(side='left', padx=(0,4))
         self.leaderboard_search_var = tk.StringVar()
-        ttk.Entry(ctrl, textvariable=self.leaderboard_search_var, width=18).pack(side='left')
+        search_entry = ttk.Entry(ctrl, textvariable=self.leaderboard_search_var, width=18)
+        search_entry.pack(side='left')
+        # debounce search-as-you-type
+        search_entry.bind('<KeyRelease>', self._on_leaderboard_key)
         tb.Button(ctrl, text='Search', command=self.load_leaderboard_async, bootstyle='outline-primary').pack(side='left', padx=6)
         tb.Button(ctrl, text='Clear', command=self._clear_leaderboard_search, bootstyle='outline-secondary').pack(side='left', padx=6)
+        Tooltip(search_entry, 'Type to filter leaderboard (search-as-you-type)')
         ttk.Label(ctrl, text='Sort:').pack(side='left', padx=(8,4))
         self.leaderboard_sort_var = tk.StringVar(value='Total')
         self.leaderboard_sort = ttk.Combobox(ctrl, values=['Total','Name'], textvariable=self.leaderboard_sort_var, state='readonly', width=8)
@@ -225,17 +329,61 @@ class EcoTrackApp(tb.Window):
         self.leaderboard.heading('kg', text='kg CO2')
         self.leaderboard.column('user', width=360)
         self.leaderboard.column('kg', width=140, anchor='center')
+        # prefer a visible row height so tree shows items
+        try:
+            self.leaderboard.configure(height=12)
+        except Exception:
+            pass
+        try:
+            self.leaderboard.configure(relief='sunken', borderwidth=1)
+        except Exception:
+            pass
 
         lb_frame = ttk.Frame(frame)
         lb_frame.pack(fill='both', expand=True, padx=10, pady=6)
+        # pack tree and scrollbar (scrollbar on right)
         self.leaderboard.pack(in_=lb_frame, fill='both', expand=True, side='left')
         lb_vsb = ttk.Scrollbar(lb_frame, orient='vertical', command=self.leaderboard.yview)
         self.leaderboard.configure(yscrollcommand=lb_vsb.set)
-        lb_vsb.pack(side='left', fill='y')
+        lb_vsb.pack(side='right', fill='y')
+        # debug label (visible fallback) - will show first few entries if tree appears blank
+        try:
+            self.leaderboard_debug = ttk.Label(lb_frame, text='', anchor='w')
+            self.leaderboard_debug.pack(fill='x', side='bottom', pady=(6,0))
+        except Exception:
+            self.leaderboard_debug = None
+        # fallback listbox for visibility (will be shown when tree appears blank)
+        try:
+            self.leaderboard_listbox = tk.Listbox(lb_frame, height=12)
+            # show listbox on top of tree by packing after the tree (so it's visible)
+            self.leaderboard_listbox.pack(fill='both', expand=True, side='left')
+            # hide the tree behind for now (listbox will display values)
+            try:
+                self.leaderboard.pack_forget()
+            except Exception:
+                pass
+        except Exception:
+            self.leaderboard_listbox = None
         # alternating row colors
         try:
-            self.leaderboard.tag_configure('odd', background='#FFFFFF')
-            self.leaderboard.tag_configure('even', background='#F7FFFB')
+            # pick light/dark-friendly colors based on current theme
+            try:
+                current_theme = tb.Style().theme_use() or (self.theme_var.get() if hasattr(self,'theme_var') else '')
+            except Exception:
+                current_theme = (self.theme_var.get() if hasattr(self,'theme_var') else '')
+            ct = (current_theme or '').lower()
+            dark_keywords = ('dark', 'super', 'cyborg', 'slate', 'sandstone', 'solar', 'darkly')
+            is_dark = any(k in ct for k in dark_keywords)
+            if is_dark:
+                odd_bg = '#24313a'
+                even_bg = '#2b3b43'
+                fg = '#ffffff'
+            else:
+                odd_bg = '#FFFFFF'
+                even_bg = '#F7FFFB'
+                fg = '#0b3d2e'
+            self.leaderboard.tag_configure('odd', background=odd_bg, foreground=fg)
+            self.leaderboard.tag_configure('even', background=even_bg, foreground=fg)
         except Exception:
             pass
 
@@ -245,6 +393,19 @@ class EcoTrackApp(tb.Window):
         except Exception:
             pass
         self.load_leaderboard_async()
+
+    def _on_leaderboard_key(self, e=None):
+        # debounce: schedule load after short delay
+        try:
+            if hasattr(self, '_search_after_id') and self._search_after_id:
+                self.after_cancel(self._search_after_id)
+        except Exception:
+            pass
+        try:
+            self._search_after_id = self.after(400, self.load_leaderboard_async)
+        except Exception:
+            # fallback
+            self.load_leaderboard_async()
 
     def _build_summary(self):
         frame = ttk.Frame(self.nb)
@@ -288,6 +449,10 @@ class EcoTrackApp(tb.Window):
             labels.append(m)
             values.append(round(totals.get(m, 0), 2))
 
+        try:
+            self.status_label.config(text='Loading summary...')
+        except Exception:
+            pass
         # draw chart with cleaner palette
         fig = Figure(figsize=(8,3.2), dpi=100, facecolor='#F8FCFB')
         ax = fig.add_subplot(111, facecolor='#F8FCFB')
@@ -297,6 +462,10 @@ class EcoTrackApp(tb.Window):
         ax.grid(axis='y', linestyle='--', alpha=0.4)
         ax.set_ylim(0, max(values) * 1.15 if values else 1)
         fig.tight_layout(pad=1.0)
+        try:
+            self.status_label.config(text='Ready')
+        except Exception:
+            pass
 
         # clear previous
         for child in self.summary_canvas_frame.winfo_children():
@@ -461,6 +630,10 @@ class EcoTrackApp(tb.Window):
 
     def load_logs(self):
         # fetch latest logs and populate treeview
+        try:
+            self.status_label.config(text='Loading logs...')
+        except Exception:
+            pass
         for i in self.tree.get_children():
             self.tree.delete(i)
         docs = db.collection('logs').order_by('timestamp', direction=firestore.Query.DESCENDING).limit(200).stream()
@@ -473,6 +646,10 @@ class EcoTrackApp(tb.Window):
             # use document id as item id
             self.tree.insert('', 'end', iid=doc.id, values=values)
         self.update_weekly_progress()
+        try:
+            self.status_label.config(text='Ready')
+        except Exception:
+            pass
 
     def load_user_profile_async(self):
         threading.Thread(target=self.load_user_profile, daemon=True).start()
@@ -653,6 +830,10 @@ class EcoTrackApp(tb.Window):
         threading.Thread(target=self.load_leaderboard, daemon=True).start()
 
     def load_leaderboard(self):
+        try:
+            self.status_label.config(text='Loading leaderboard...')
+        except Exception:
+            pass
         for i in self.leaderboard.get_children():
             self.leaderboard.delete(i)
         all_docs = db.collection('logs').stream()
@@ -721,9 +902,57 @@ class EcoTrackApp(tb.Window):
         else:
             rows.sort(key=lambda x: x[2], reverse=True)
 
+        # debug: print counts
+        try:
+            print(f'[EcoTrack] leaderboard totals={len(totals)} rows_after_filter={len(rows)}')
+            for r in rows[:8]:
+                print('  ->', r[1], r[2])
+            try:
+                # also print first item's bbox to debug visibility
+                cid = self.leaderboard.get_children()
+                if cid:
+                    print('  bbox first item:', self.leaderboard.bbox(cid[0]))
+            except Exception:
+                pass
+        except Exception:
+            pass
+        # populate listbox fallback and tree
+        if getattr(self, 'leaderboard_listbox', None) is not None:
+            try:
+                self.leaderboard_listbox.delete(0, 'end')
+            except Exception:
+                pass
         for idx, (uid, display_name, kg) in enumerate(rows[:200]):
             tag = 'even' if idx % 2 == 0 else 'odd'
+            # force visible foreground for debugging
+            try:
+                self.leaderboard.tag_configure(tag, foreground='#000000')
+            except Exception:
+                pass
             self.leaderboard.insert('', 'end', values=(display_name, round(kg, 2)), tags=(tag,))
+            try:
+                if getattr(self, 'leaderboard_listbox', None) is not None:
+                    self.leaderboard_listbox.insert('end', f"{display_name} — {round(kg,2)} kg")
+            except Exception:
+                pass
+        try:
+            if getattr(self, 'leaderboard_debug', None) is not None:
+                sample = ', '.join([r[1] for r in rows[:6]])
+                self.leaderboard_debug.config(text=f'Preview: {sample}')
+        except Exception:
+            pass
+        try:
+            # ensure first item is visible
+            children = self.leaderboard.get_children()
+            if children:
+                self.leaderboard.see(children[0])
+                self.leaderboard.update_idletasks()
+        except Exception:
+            pass
+        try:
+            self.status_label.config(text='Ready')
+        except Exception:
+            pass
 
     # --- Authentication helpers ---
     def _load_firebase_config(self):
@@ -737,6 +966,24 @@ class EcoTrackApp(tb.Window):
                 self.api_key = None
         else:
             self.api_key = os.environ.get('FIREBASE_API_KEY')
+
+    def change_theme(self):
+        # attempt to switch ttkbootstrap theme at runtime
+        t = None
+        try:
+            t = (self.theme_var.get() or '').strip()
+        except Exception:
+            return
+        if not t:
+            return
+        try:
+            st = tb.Style()
+            st.theme_use(t)
+        except Exception:
+            try:
+                tb.set_theme(t)
+            except Exception:
+                pass
 
     def register(self):
         if not self.api_key:
@@ -754,6 +1001,10 @@ class EcoTrackApp(tb.Window):
             data = r.json()
             self.current_user = {'uid': data['localId'], 'email': email, 'idToken': data['idToken']}
             self.user_label.config(text=f"Signed in: {email}")
+            try:
+                self.header_user_label.config(text=email)
+            except Exception:
+                pass
             try:
                 self.signout_btn.config(state='normal')
             except Exception:
@@ -780,6 +1031,10 @@ class EcoTrackApp(tb.Window):
             self.current_user = {'uid': data['localId'], 'email': email, 'idToken': data['idToken']}
             self.user_label.config(text=f"Signed in: {email}")
             try:
+                self.header_user_label.config(text=email)
+            except Exception:
+                pass
+            try:
                 self.signout_btn.config(state='normal')
                 self.signin_btn.config(state='disabled')
                 self.register_btn.config(state='disabled')
@@ -803,6 +1058,10 @@ class EcoTrackApp(tb.Window):
     def sign_out(self):
         self.current_user = None
         self.user_label.config(text='Not signed in')
+        try:
+            self.header_user_label.config(text='Not signed in')
+        except Exception:
+            pass
         try:
             self.signout_btn.config(state='disabled')
         except Exception:
