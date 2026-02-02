@@ -323,50 +323,12 @@ class EcoTrackApp(tb.Window):
         self.leaderboard_sort.pack(side='left')
         tb.Button(top, text='Refresh', command=self.load_leaderboard_async, bootstyle='primary').pack(side='right')
 
-        # leaderboard tree with scrollbar and nicer sizing
-        self.leaderboard = ttk.Treeview(frame, columns=('user','kg'), show='headings', selectmode='browse')
-        self.leaderboard.heading('user', text='User')
-        self.leaderboard.heading('kg', text='kg CO2')
-        self.leaderboard.column('user', width=360)
-        self.leaderboard.column('kg', width=140, anchor='center')
-        # prefer a visible row height so tree shows items
-        try:
-            self.leaderboard.configure(height=12)
-        except Exception:
-            pass
-        try:
-            self.leaderboard.configure(relief='sunken', borderwidth=1)
-        except Exception:
-            pass
-
+        # leaderboard listbox with scrollbar (Listbox is the primary widget)
         lb_frame = ttk.Frame(frame)
         lb_frame.pack(fill='both', expand=True, padx=10, pady=6)
-        # pack tree and scrollbar (scrollbar on right)
-        self.leaderboard.pack(in_=lb_frame, fill='both', expand=True, side='left')
-        lb_vsb = ttk.Scrollbar(lb_frame, orient='vertical', command=self.leaderboard.yview)
-        self.leaderboard.configure(yscrollcommand=lb_vsb.set)
-        lb_vsb.pack(side='right', fill='y')
-        # debug label (visible fallback) - will show first few entries if tree appears blank
         try:
-            self.leaderboard_debug = ttk.Label(lb_frame, text='', anchor='w')
-            self.leaderboard_debug.pack(fill='x', side='bottom', pady=(6,0))
-        except Exception:
-            self.leaderboard_debug = None
-        # fallback listbox for visibility (will be shown when tree appears blank)
-        try:
-            self.leaderboard_listbox = tk.Listbox(lb_frame, height=12)
-            # show listbox on top of tree by packing after the tree (so it's visible)
-            self.leaderboard_listbox.pack(fill='both', expand=True, side='left')
-            # hide the tree behind for now (listbox will display values)
-            try:
-                self.leaderboard.pack_forget()
-            except Exception:
-                pass
-        except Exception:
-            self.leaderboard_listbox = None
-        # alternating row colors
-        try:
-            # pick light/dark-friendly colors based on current theme
+            self.leaderboard_listbox = tk.Listbox(lb_frame, height=12, activestyle='none', exportselection=False)
+            # theme-aware styling
             try:
                 current_theme = tb.Style().theme_use() or (self.theme_var.get() if hasattr(self,'theme_var') else '')
             except Exception:
@@ -375,17 +337,33 @@ class EcoTrackApp(tb.Window):
             dark_keywords = ('dark', 'super', 'cyborg', 'slate', 'sandstone', 'solar', 'darkly')
             is_dark = any(k in ct for k in dark_keywords)
             if is_dark:
-                odd_bg = '#24313a'
-                even_bg = '#2b3b43'
-                fg = '#ffffff'
+                lb_bg = '#1f2a2f'
+                lb_fg = '#e6f2ef'
+                sel_bg = '#2b6b77'
+                sel_fg = '#ffffff'
             else:
-                odd_bg = '#FFFFFF'
-                even_bg = '#F7FFFB'
-                fg = '#0b3d2e'
-            self.leaderboard.tag_configure('odd', background=odd_bg, foreground=fg)
-            self.leaderboard.tag_configure('even', background=even_bg, foreground=fg)
+                lb_bg = '#ffffff'
+                lb_fg = '#0b3d2e'
+                sel_bg = '#ccefe6'
+                sel_fg = '#0b3d2e'
+            try:
+                self.leaderboard_listbox.configure(bg=lb_bg, fg=lb_fg, selectbackground=sel_bg, selectforeground=sel_fg, font=('Segoe UI', 10))
+            except Exception:
+                pass
+            # pack and attach scrollbar
+            self.leaderboard_listbox.pack(fill='both', expand=True, side='left')
+            lb_vsb = ttk.Scrollbar(lb_frame, orient='vertical', command=self.leaderboard_listbox.yview)
+            self.leaderboard_listbox.configure(yscrollcommand=lb_vsb.set)
+            lb_vsb.pack(side='right', fill='y')
         except Exception:
-            pass
+            self.leaderboard_listbox = None
+
+        # debug label to show a preview of entries
+        try:
+            self.leaderboard_debug = ttk.Label(lb_frame, text='', anchor='w')
+            self.leaderboard_debug.pack(fill='x', side='bottom', pady=(6,0))
+        except Exception:
+            self.leaderboard_debug = None
 
     def _clear_leaderboard_search(self):
         try:
@@ -834,8 +812,12 @@ class EcoTrackApp(tb.Window):
             self.status_label.config(text='Loading leaderboard...')
         except Exception:
             pass
-        for i in self.leaderboard.get_children():
-            self.leaderboard.delete(i)
+        # clear previous leaderboard listbox entries
+        try:
+            if getattr(self, 'leaderboard_listbox', None) is not None:
+                self.leaderboard_listbox.delete(0, 'end')
+        except Exception:
+            pass
         all_docs = db.collection('logs').stream()
         totals = {}
         total_community = 0
@@ -907,34 +889,23 @@ class EcoTrackApp(tb.Window):
             print(f'[EcoTrack] leaderboard totals={len(totals)} rows_after_filter={len(rows)}')
             for r in rows[:8]:
                 print('  ->', r[1], r[2])
-            try:
-                # also print first item's bbox to debug visibility
-                cid = self.leaderboard.get_children()
-                if cid:
-                    print('  bbox first item:', self.leaderboard.bbox(cid[0]))
-            except Exception:
-                pass
         except Exception:
             pass
-        # populate listbox fallback and tree
-        if getattr(self, 'leaderboard_listbox', None) is not None:
-            try:
-                self.leaderboard_listbox.delete(0, 'end')
-            except Exception:
-                pass
-        for idx, (uid, display_name, kg) in enumerate(rows[:200]):
-            tag = 'even' if idx % 2 == 0 else 'odd'
-            # force visible foreground for debugging
-            try:
-                self.leaderboard.tag_configure(tag, foreground='#000000')
-            except Exception:
-                pass
-            self.leaderboard.insert('', 'end', values=(display_name, round(kg, 2)), tags=(tag,))
-            try:
-                if getattr(self, 'leaderboard_listbox', None) is not None:
-                    self.leaderboard_listbox.insert('end', f"{display_name} — {round(kg,2)} kg")
-            except Exception:
-                pass
+
+        # populate listbox (primary display)
+        try:
+            if getattr(self, 'leaderboard_listbox', None) is not None:
+                for idx, (uid, display_name, kg) in enumerate(rows[:200]):
+                    try:
+                        self.leaderboard_listbox.insert('end', f"{display_name} — {round(kg,2)} kg")
+                    except Exception:
+                        # fallback: simple str
+                        try:
+                            self.leaderboard_listbox.insert('end', str(display_name))
+                        except Exception:
+                            pass
+        except Exception:
+            pass
         try:
             if getattr(self, 'leaderboard_debug', None) is not None:
                 sample = ', '.join([r[1] for r in rows[:6]])
@@ -942,11 +913,12 @@ class EcoTrackApp(tb.Window):
         except Exception:
             pass
         try:
-            # ensure first item is visible
-            children = self.leaderboard.get_children()
-            if children:
-                self.leaderboard.see(children[0])
-                self.leaderboard.update_idletasks()
+            # ensure first item is visible in listbox
+            if getattr(self, 'leaderboard_listbox', None) is not None and self.leaderboard_listbox.size() > 0:
+                try:
+                    self.leaderboard_listbox.see(0)
+                except Exception:
+                    pass
         except Exception:
             pass
         try:
