@@ -322,12 +322,16 @@ class EcoTrackApp(tb.Window):
         self.leaderboard_sort = ttk.Combobox(ctrl, values=['Total','Name'], textvariable=self.leaderboard_sort_var, state='readonly', width=8)
         self.leaderboard_sort.pack(side='left')
         tb.Button(top, text='Refresh', command=self.load_leaderboard_async, bootstyle='primary').pack(side='right')
+        tb.Button(top, text='Export', command=self.export_leaderboard_csv, bootstyle='outline-secondary').pack(side='right', padx=(6,0))
 
         # leaderboard listbox with scrollbar (Listbox is the primary widget)
         lb_frame = ttk.Frame(frame)
         lb_frame.pack(fill='both', expand=True, padx=10, pady=6)
         try:
-            self.leaderboard_listbox = tk.Listbox(lb_frame, height=12, activestyle='none', exportselection=False)
+            # inner frame to provide visual padding around listbox items
+            lb_inner = ttk.Frame(lb_frame, padding=(6,4))
+            lb_inner.pack(fill='both', expand=True, side='left')
+            self.leaderboard_listbox = tk.Listbox(lb_inner, height=12, activestyle='none', exportselection=False, bd=0, highlightthickness=0, relief='flat')
             # theme-aware styling
             try:
                 current_theme = tb.Style().theme_use() or (self.theme_var.get() if hasattr(self,'theme_var') else '')
@@ -350,8 +354,16 @@ class EcoTrackApp(tb.Window):
                 self.leaderboard_listbox.configure(bg=lb_bg, fg=lb_fg, selectbackground=sel_bg, selectforeground=sel_fg, font=('Segoe UI', 10))
             except Exception:
                 pass
-            # pack and attach scrollbar
-            self.leaderboard_listbox.pack(fill='both', expand=True, side='left')
+            # pack and attach scrollbar (scrollbar stays in outer frame)
+            self.leaderboard_listbox.pack(fill='both', expand=True, side='left', padx=(0,6), pady=2)
+            lb_vsb = ttk.Scrollbar(lb_frame, orient='vertical', command=self.leaderboard_listbox.yview)
+            self.leaderboard_listbox.configure(yscrollcommand=lb_vsb.set)
+            lb_vsb.pack(side='right', fill='y')
+            # bind double-click to open user profile
+            try:
+                self.leaderboard_listbox.bind('<Double-Button-1>', self._on_leaderboard_double)
+            except Exception:
+                pass
             lb_vsb = ttk.Scrollbar(lb_frame, orient='vertical', command=self.leaderboard_listbox.yview)
             self.leaderboard_listbox.configure(yscrollcommand=lb_vsb.set)
             lb_vsb.pack(side='right', fill='y')
@@ -614,7 +626,19 @@ class EcoTrackApp(tb.Window):
             pass
         for i in self.tree.get_children():
             self.tree.delete(i)
-        docs = db.collection('logs').order_by('timestamp', direction=firestore.Query.DESCENDING).limit(200).stream()
+        # support optional per-user filter (set by leaderboard profile view)
+        uid_filter = getattr(self, 'logs_filter_user', None)
+        try:
+            if uid_filter:
+                docs = db.collection('logs').where('user_id', '==', uid_filter).order_by('timestamp', direction=firestore.Query.DESCENDING).limit(200).stream()
+            else:
+                docs = db.collection('logs').order_by('timestamp', direction=firestore.Query.DESCENDING).limit(200).stream()
+        except Exception:
+            # fallback to simple stream if ordering with where fails
+            try:
+                docs = db.collection('logs').stream()
+            except Exception:
+                docs = []
         for doc in docs:
             d = doc.to_dict()
             timestamp = d.get('timestamp')
@@ -869,6 +893,12 @@ class EcoTrackApp(tb.Window):
             display_name = label_map.get(uid, uid)
             rows.append((uid, display_name, kg))
 
+        # store rows for UI interactions
+        try:
+            self.leaderboard_rows = rows
+        except Exception:
+            self.leaderboard_rows = []
+
         # apply search
         if search_term:
             rows = [r for r in rows if search_term in (r[1] or '').lower() or search_term in (r[0] or '').lower()]
@@ -895,11 +925,15 @@ class EcoTrackApp(tb.Window):
         # populate listbox (primary display)
         try:
             if getattr(self, 'leaderboard_listbox', None) is not None:
-                for idx, (uid, display_name, kg) in enumerate(rows[:200]):
+                # keep a copy of rows for selection actions
+                try:
+                    self.leaderboard_rows = rows[:200]
+                except Exception:
+                    self.leaderboard_rows = rows
+                for idx, (uid, display_name, kg) in enumerate(self.leaderboard_rows):
                     try:
                         self.leaderboard_listbox.insert('end', f"{display_name} — {round(kg,2)} kg")
                     except Exception:
-                        # fallback: simple str
                         try:
                             self.leaderboard_listbox.insert('end', str(display_name))
                         except Exception:
@@ -1060,6 +1094,103 @@ class EcoTrackApp(tb.Window):
         except Exception:
             pass
         self.load_leaderboard_async()
+
+    # --- Leaderboard -> Profile helpers ---
+    def _on_leaderboard_double(self, event=None):
+        try:
+            sel = self.leaderboard_listbox.curselection()
+            if not sel:
+                return
+            idx = int(sel[0])
+            rows = getattr(self, 'leaderboard_rows', []) or []
+            if idx < 0 or idx >= len(rows):
+                return
+            uid, display_name, kg = rows[idx]
+            self._show_user_profile(uid, display_name)
+        except Exception:
+            pass
+
+    def _show_user_profile(self, uid, display_name=None):
+        # simple Toplevel showing user details and quick actions
+        try:
+            if not uid:
+                messagebox.showinfo('Profile','No user id available')
+                return
+            # create window
+            win = tk.Toplevel(self)
+            win.title(display_name or uid)
+            win.geometry('420x200')
+            container = ttk.Frame(win, padding=12)
+            container.pack(fill='both', expand=True)
+            ttk.Label(container, text='User Profile', font=('Segoe UI', 11, 'bold')).pack(anchor='w')
+            ttk.Separator(container).pack(fill='x', pady=6)
+            # fetch user doc
+            name = display_name or ''
+            loc = ''
+            goal = None
+            try:
+                if uid not in ('default_user', 'Unknown'):
+                    doc = db.collection('users').document(uid).get()
+                    if doc.exists:
+                        d = doc.to_dict()
+                        name = d.get('display_name') or name or ''
+                        loc = d.get('location') or ''
+                        goal = d.get('weekly_goal_kg')
+            except Exception:
+                pass
+            ttk.Label(container, text=f'Name: {name}').pack(anchor='w', pady=(6,0))
+            ttk.Label(container, text=f'UID: {uid}').pack(anchor='w')
+            ttk.Label(container, text=f'Location: {loc or "(not set)"}').pack(anchor='w')
+            ttk.Label(container, text=f'Weekly Goal: {goal if goal is not None else "(not set)"}').pack(anchor='w')
+
+            btn_frame = ttk.Frame(container)
+            btn_frame.pack(fill='x', pady=12)
+            def _show_logs():
+                try:
+                    self.logs_filter_user = uid
+                    self.load_logs_async()
+                except Exception:
+                    pass
+                try:
+                    win.destroy()
+                except Exception:
+                    pass
+
+            def _clear_filter():
+                try:
+                    self.logs_filter_user = None
+                    self.load_logs_async()
+                except Exception:
+                    pass
+                try:
+                    win.destroy()
+                except Exception:
+                    pass
+
+            tb.Button(btn_frame, text="Show user's logs", command=_show_logs, bootstyle='primary').pack(side='left', padx=4)
+            tb.Button(btn_frame, text='Clear log filter', command=_clear_filter, bootstyle='secondary').pack(side='left', padx=4)
+            tb.Button(btn_frame, text='Close', command=win.destroy, bootstyle='outline-secondary').pack(side='right')
+        except Exception:
+            pass
+
+    def export_leaderboard_csv(self):
+        # export the currently-loaded leaderboard rows to a CSV
+        rows = getattr(self, 'leaderboard_rows', []) or []
+        if not rows:
+            messagebox.showinfo('Export Leaderboard', 'No leaderboard data to export')
+            return
+        fpath = filedialog.asksaveasfilename(title='Save Leaderboard CSV', defaultextension='.csv', filetypes=[('CSV files','*.csv')])
+        if not fpath:
+            return
+        try:
+            with open(fpath, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(['uid','display_name','kg_co2'])
+                for uid, display_name, kg in rows:
+                    writer.writerow([uid, display_name, round(kg,2)])
+            messagebox.showinfo('Export Leaderboard', f'Exported {len(rows)} rows to {fpath}')
+        except Exception as ex:
+            messagebox.showerror('Export Leaderboard', str(ex))
 
 if __name__ == '__main__':
     app = EcoTrackApp()
