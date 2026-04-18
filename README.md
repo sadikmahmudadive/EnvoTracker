@@ -1,149 +1,89 @@
-# 🌿 EcoTrack - Personal Carbon Footprint Dashboard
+# EcoTrack — Desktop Carbon Tracker (Tkinter)
 
-A beautiful desktop application to track your daily carbon footprint and join a community of eco-conscious users!
+>A lightweight desktop application to track personal carbon footprint, sync logs to Firebase Firestore, and view community totals and leaderboards.
 
-## ✨ Features
+## Quick summary
+- UI: Tkinter with `ttkbootstrap` theme
+- Data backend: Firebase Firestore via `firebase-admin` and Firebase Authentication (REST) for email/password
+- Main script: `main_tk.py`
 
-### Complete CRUD Operations
-- ✅ **Create**: Log daily activities (transport, meals, energy usage)
-- ✅ **Read**: View all your historical logs in a clean, organized list
-- ✅ **Update**: Edit any entry if you forgot details or made a mistake
-- ✅ **Delete**: Remove incorrect or accidental logs
+## Prerequisites
+- Python 3.8 or newer
+- A Firebase project with Firestore and Email/Password authentication enabled
 
-### Smart Carbon Tracking
-- 🚗 **Transport**: Track car, bus, train, bike, walking, and EV usage
-- 🍽️ **Meals**: Log beef, chicken, vegetarian, or vegan meals
-- ⚡ **Energy**: Monitor electricity and natural gas consumption
-- 📊 **Auto-calculation**: Automatic CO2 impact calculation based on scientific data
+## Install (recommended: virtual environment)
+Windows (cmd):
 
-### Community Features
-- 🏆 **Live Leaderboard**: See how you compare with other users
-- 🌍 **Global Impact**: View total CO2 tracked by the entire community
-- 🔄 **Real-time Updates**: Data syncs instantly via Firebase
+```powershell
+python -m venv .venv
+.venv\Scripts\activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m pip install requests
+```
 
-### Beautiful UI
-- 🌿 **Nature-inspired Theme**: Soft greens and calming colors
-- 📈 **Progress Tracking**: Visual progress bars for weekly goals
-- 📱 **Responsive Design**: Clean, modern interface with card-based layouts
-- 🎨 **Color-coded Logs**: Quick visual feedback on impact levels
-
-## 🚀 Setup Instructions
-
-### 1. Prerequisites
-- Python 3.8 or higher
-- A Firebase account
-
-### 2. Firebase Setup
-
-1. Go to [Firebase Console](https://console.firebase.google.com/)
-2. Create a new project (or use an existing one)
-3. Go to Project Settings → Service Accounts
-4. Click "Generate New Private Key"
-5. Save the JSON file as `serviceAccountKey.json` in the EcoTrack folder
-6. Enable Firestore Database in your Firebase project
-
-### 3. Install Dependencies
+macOS / Linux (bash):
 
 ```bash
-pip install -r requirements.txt
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m pip install requests
 ```
 
-### 4. Run the Application
+Note: `requirements.txt` includes `firebase-admin`, `ttkbootstrap`, and `matplotlib`. `requests` is used by the app for Firebase REST auth and is installed separately above.
 
-```bash
-python main.py
-```
+## Firebase setup
+1. Open the Firebase Console and create (or open) a project.
+2. Enable Firestore Database (in native mode).
+3. Enable Authentication → Sign-in method → Email/Password.
+4. Generate a service account private key: Project settings → Service accounts → Generate new private key. Save the JSON and place it in the project root as `serviceAccountKey.json`.
+5. Obtain your Web API key (Project settings → General → Web API Key) and add it to `firebase_config.json` like this:
 
-## 📖 How to Use
-
-### Dashboard Tab
-1. Select an activity type (Transport, Meal, or Energy)
-2. Choose the specific activity detail from the dropdown
-3. Enter the amount (miles, units, etc.)
-4. Add an optional description
-5. Click "Add Log" to save
-
-### Editing Logs
-- Click the ✏️ edit icon next to any log
-- Modify the details in the form
-- Click "Update Log" to save changes
-
-### Community Tab
-- View the leaderboard of top contributors
-- See total community CO2 impact
-- Click "Refresh" to update the data
-
-## 🎯 Weekly Goals
-
-The app tracks your weekly CO2 impact and shows progress toward a 50kg goal. Adjust this in the code if needed!
-
-## 🔧 Customization
-
-### Change Carbon Emission Values
-Edit the `ACTIVITY_EMISSIONS` dictionary in `main.py`:
-
-```python
-ACTIVITY_EMISSIONS = {
-    "Car (per mile)": 0.404,  # Modify these values
-    "Bike (per mile)": 0.0,
-    # Add more activities...
-}
-```
-
-### Adjust Weekly Goal
-Find this line in `main.py`:
-
-```python
-weekly_goal = 50  # Change to your desired goal
-```
-
-## 📊 Data Structure
-
-### Log Entry Format
-```python
+```json
 {
-    "activity_type": "Transport",
-    "activity_detail": "Bike (per mile)",
-    "amount": 10.0,
-    "description": "Morning commute",
-    "co2_impact": 0.0,
-    "timestamp": datetime.now(),
-    "user_id": "default_user"
+  "apiKey": "YOUR_FIREBASE_API_KEY"
 }
 ```
 
-## 🤝 Multi-User Support
+Alternatively, set an environment variable `FIREBASE_API_KEY` and the app will read that if `firebase_config.json` is not present.
 
-To enable real multi-user functionality:
-1. Implement user authentication
-2. Replace `"default_user"` with actual user IDs
-3. Add user profiles and avatars to the leaderboard
+Security note: Do NOT commit `serviceAccountKey.json` into source control. Keep it private.
 
-## 🐛 Troubleshooting
+## Configuration files in repo
+- `serviceAccountKey.json` — Firebase Admin service account key (you must provide this)
+- `firebase_config.json` — small JSON with `apiKey` used for Firebase Authentication (or set `FIREBASE_API_KEY` env var)
 
-### Firebase Connection Issues
-- Ensure `serviceAccountKey.json` is in the correct location
-- Check that Firestore is enabled in Firebase Console
-- Verify your internet connection
+## Run the app
+From the project root after activating your virtualenv:
 
-### Module Not Found
 ```bash
-pip install --upgrade flet firebase-admin
+python main_tk.py
 ```
 
-## 📝 License
+You should see the EcoTrack desktop window. If the app warns about a missing API key, either create `firebase_config.json` (above) or set `FIREBASE_API_KEY`.
 
-This project is open source and available for personal and educational use.
+## Usage notes
+- Create logs on the Dashboard tab; logs are saved to Firestore.
+- Register or sign in using Email/Password to store logs under your user id and enable editing/deleting your entries.
+- Export CSVs from the Dashboard or Community tabs.
 
-## 🌟 Future Enhancements
+## Emission factors
+The app uses a built-in `EM` dictionary in `main_tk.py` to calculate CO2 impact per activity. Edit the dictionary in `main_tk.py` if you need to change values.
 
-- [ ] Export data to CSV
-- [ ] Monthly/yearly statistics
-- [ ] Goal customization per user
-- [ ] Push notifications for milestones
-- [ ] Social sharing features
-- [ ] Carbon offset recommendations
+## Troubleshooting
+- If you see `ModuleNotFoundError`, ensure your virtual environment is active and dependencies are installed.
+- If Firestore calls fail, confirm `serviceAccountKey.json` is present and Firestore is enabled.
+- If Firebase Authentication fails, confirm `firebase_config.json` contains a valid `apiKey` or set `FIREBASE_API_KEY`.
+
+## Development
+- The UI code lives in `main_tk.py`. The app is structured for quick edits and small experiments.
 
 ---
 
-Made with 💚 for a greener planet!
+If you want, I can also:
+- add `requests` to `requirements.txt` so `pip install -r requirements.txt` installs everything, or
+- create a small `run.ps1` / `run.sh` helper to start the app.
+
+Made with 💚 — help us make it greener!
