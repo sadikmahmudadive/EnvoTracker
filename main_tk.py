@@ -251,6 +251,18 @@ class EcoTrackApp(tb.Window):
         tree_frame = ttk.Frame(frame)
         tree_frame.pack(fill='both', expand=True, padx=10, pady=8)
 
+        # Active log filter banner
+        filter_bar = ttk.Frame(tree_frame)
+        filter_bar.pack(fill='x', padx=2, pady=(0,4))
+        self.log_filter_label = ttk.Label(filter_bar, text='', foreground='#2b6b77')
+        self.log_filter_label.pack(side='left')
+        self.clear_log_filter_btn = tb.Button(filter_bar, text='Clear log filter', command=self._clear_log_filter, bootstyle='secondary')
+        self.clear_log_filter_btn.pack(side='right')
+        try:
+            self.clear_log_filter_btn.config(state='disabled')
+        except Exception:
+            pass
+
         # include hidden 'uid' column to track owner of each log
         cols = ('detail','amount','impact','description','time','uid')
         self.tree = ttk.Treeview(tree_frame, columns=cols, show='headings', selectmode='browse')
@@ -647,6 +659,26 @@ class EcoTrackApp(tb.Window):
             values = (d.get('activity_detail'), d.get('amount'), d.get('co2_impact'), d.get('description'), t, d.get('user_id','default_user'))
             # use document id as item id
             self.tree.insert('', 'end', iid=doc.id, values=values)
+        # update filter banner text/state
+        try:
+            if uid_filter:
+                try:
+                    display = None
+                    if hasattr(self, 'leaderboard_rows'):
+                        for (uid, name, _kg) in getattr(self, 'leaderboard_rows', []) or []:
+                            if uid == uid_filter:
+                                display = name
+                                break
+                    self.log_filter_label.config(text=f'Filtering logs for: {display or uid_filter}')
+                    self.clear_log_filter_btn.config(state='normal')
+                except Exception:
+                    pass
+            else:
+                self.log_filter_label.config(text='')
+                self.clear_log_filter_btn.config(state='disabled')
+        except Exception:
+            pass
+
         self.update_weekly_progress()
         try:
             self.status_label.config(text='Ready')
@@ -1170,6 +1202,13 @@ class EcoTrackApp(tb.Window):
             tb.Button(btn_frame, text="Show user's logs", command=_show_logs, bootstyle='primary').pack(side='left', padx=4)
             tb.Button(btn_frame, text='Clear log filter', command=_clear_filter, bootstyle='secondary').pack(side='left', padx=4)
             tb.Button(btn_frame, text='Close', command=win.destroy, bootstyle='outline-secondary').pack(side='right')
+        except Exception:
+            pass
+
+    def _clear_log_filter(self):
+        try:
+            self.logs_filter_user = None
+            self.load_logs_async()
         except Exception:
             pass
 
